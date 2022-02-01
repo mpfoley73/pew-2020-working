@@ -1,0 +1,269 @@
+---
+title: "Ethnicity and Identity"
+subtitle: "Data Management"
+author: "Michael Foley"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    theme: flatly
+    toc: true
+    toc_float: true
+    highlight: haddock
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE
+)
+
+library(tidyverse)
+library(janitor)
+library(survey)
+library(scales)
+library(gtsummary)
+```
+
+The [American Trends Panel Wave 77](https://www.pewresearch.org/social-trends/dataset/american-trends-panel-wave-77/) data set is available for download at the PEW Research web site. This data was collected from a survey conducted Oct. 13-19, 2020. Everyone who took part is a member of the Pew Research Center’s American Trends Panel (ATP), an online survey panel that is recruited through national, random sampling of residential addresses. The survey is weighted to be representative of the U.S. adult population by gender, race, ethnicity, partisan affiliation, education and other categories ([ATP methodology](https://www.pewresearch.org/methods/u-s-survey-research/american-trends-panel/)).
+
+```{r warning=FALSE, message=FALSE, class.source = 'fold-show'}
+dat_0 <- foreign::read.spss(
+  "../data/ATP W77.sav", 
+  to.data.frame = TRUE
+)
+
+svy_0 <- svydesign(ids = ~1, weights = ~ WEIGHT_W77, data = dat_0)
+```
+
+The data set consists of `r dim(dat_0)[2]` variables collected from `r dim(dat_0)[1] %>% comma(1)` participants. Only a fraction of the columns are of interest for this analysis.
+
+I did not find a codebook associated with the descriptive fields, so I'm going to have to infer a bit. The questions and associated variable names are in the [questionanaire](file:///C:/Users/mpfol/AppData/Local/Temp/Temp1_W77_Oct20.zip/W77_Oct20/ATP%20W77%20questionnaire.pdf).
+
+## Demographics
+
+Most demographic variables are self-explanatory from the variable name or from the response options. A few need explanation.
+
+* `XKIDS1_W77`: PARENTS OF CHILDREN UNDER 18.
+* `XPARENT_W77`: PARENTS OF CHILDREN UNDER 18 *LIVING IN HOUSEHOLD* (*No* could mean they are not parents of children under 18, or they are parents of children under 18 but the children are not living in in the household.)
+
+```{r}
+svy_0 %>% gtsummary::tbl_svysummary(
+  include = c(starts_with("X"), starts_with("F_"), E_COVID_W77, 
+              E_COVIDPARTNER_W77, WFHCURR_W77, WFHPARTNERCURR_W77,
+              WFHPOSTCVD_W77, CHILD_LT12_W77))
+```
+
+## Questions
+
+You can read all of the questions and response options in the [questionnaire](file:///C:/Users/mpfol/AppData/Local/Temp/Temp1_W77_Oct20.zip/W77_Oct20/ATP%20W77%20questionnaire.pdf). I am particularly interested in questions related to how spouses share family responsibilities.
+
+### `FAMSURV1`
+
+> At this point in your life, which of the following would be best for you personally? 
+
+```{r}
+svy_0 %>% 
+  subset(E_COVID_W77 %in% c("Employed full-time", "Employed part-time")) %>%
+  tbl_svysummary(by = "F_GENDER", include = "FAMSURV1_W77", percent = "col")
+```
+
+### `FAMSURV32`
+
+> How do you feel about each of the following?
+> 
+> * `FAMSURV32_a_W77`: The way household chores are divided between you and your spouse or partner
+> * `FAMSURV32_c_W77`: How well you and your spouse or partner communicate with each other
+> * `FAMSURV32_d_W77`: How well your spouse or partner balances work and their personal life
+> * `FAMSURV32_e_W77`: Your spouse or partner’s approach to parenting
+  
+```{r}
+svy_0 %>% 
+  subset(E_COVID_W77 %in% c("Employed full-time", "Employed part-time")) %>%
+  tbl_svysummary(by = "F_GENDER", include = starts_with("FAMSURV32"), percent = "col")
+```
+
+### `FAMSURV35`
+
+> Since the beginning of the coronavirus outbreak, have you personally experienced the following because you were balancing work and parenting responsibilities?
+> 
+> * `FAMSURV35_a_W77`: Needed to reduce your work hours
+> * `FAMSURV35_b_W77`: Felt like you couldn’t give 100% at work
+> * `FAMSURV35_c_W77`: Turned down a promotion 
+> * `FAMSURV35_d_W77`: Turned down an important assignment at work
+
+```{r}
+svy_0 %>% 
+  subset(E_COVID_W77 %in% c("Employed full-time", "Employed part-time")) %>%
+  tbl_svysummary(by = "F_GENDER", include = starts_with("FAMSURV35"), percent = "col")
+```
+
+### `FAMSURV36`
+
+> Since the beginning of the coronavirus outbreak, have you personally experienced the 
+following at work because you have children?
+>
+>* `FAMSURV36_a_W77`: Being passed over for a promotion
+>* `FAMSURV36_b_W77`: Being passed over for an important assignment
+>* `FAMSURV36_c_W77`: Being treated as if you weren’t committed to your work
+
+```{r}
+svy_0 %>% 
+  subset(E_COVID_W77 %in% c("Employed full-time", "Employed part-time")) %>%
+  tbl_svysummary(by = "F_GENDER", include = starts_with("FAMSURV36"), percent = "col")
+```
+
+### `FAMSURV38`
+
+> For each of the following, who would you say does more?
+> 
+> * `FAMSURV38_a_W77`: Household chores and responsibilities
+> * `FAMSURV38_b_W77`: Managing household finances
+> * `FAMSURV38_c_W77`: Managing your child(ren)’s schedule and activities
+> * `FAMSURV38_d_W77`: Being an involved parent
+
+```{r}
+svy_0 %>% 
+  subset(E_COVID_W77 %in% c("Employed full-time", "Employed part-time")) %>%
+  tbl_svysummary(by = "F_GENDER", include = starts_with("FAMSURV38"), percent = "col")
+```
+
+### `TIMEOFF`
+
+> Some companies have given working parents additional time off to deal with disruptions caused by the coronavirus outbreak. Do you think this is…
+
+```{r}
+svy_0 %>% 
+  subset(E_COVID_W77 %in% c("Employed full-time", "Employed part-time")) %>%
+  tbl_svysummary(by = "F_GENDER", include = "TIMEOFF_W77", percent = "col")
+```
+
+### `TIMECHILD`
+
+> Thinking about the time *you* spend with your CHILDREN these days, do you think you spend…
+
+```{r}
+svy_0 %>% 
+  subset(E_COVID_W77 %in% c("Employed full-time", "Employed part-time")) %>%
+  tbl_svysummary(by = "F_GENDER", include = "TIMECHILD_W77", percent = "col")
+```
+
+### `TIMESPOUSE`
+
+> Thinking about the time you spend with your SPOUSE OR PARTNER these days, do you think you spend…
+
+```{r}
+svy_0 %>% 
+  subset(E_COVID_W77 %in% c("Employed full-time", "Employed part-time")) %>%
+  tbl_svysummary(by = "F_GENDER", include = "TIMESPOUSE_W77", percent = "col")
+```
+
+### `CHILDHOME`
+
+> Do you have any child care responsibilities when you’re working from home?
+
+```{r}
+svy_0 %>% 
+  subset(E_COVID_W77 %in% c("Employed full-time", "Employed part-time")) %>%
+  tbl_svysummary(by = "F_GENDER", include = "CHILDHOME_W77", percent = "col")
+```
+
+### `CVDBALANCE`
+
+> Compared with before the coronavirus outbreak, is it...
+
+```{r}
+svy_0 %>% 
+  subset(E_COVID_W77 %in% c("Employed full-time", "Employed part-time")) %>%
+  tbl_svysummary(by = "F_GENDER", include = "CVDBALANCE_W77", percent = "col")
+```
+
+### `CVCHILDCARE`
+
+> How easy or difficult has it been for you to handle child care responsibilities during the coronavirus outbreak?
+
+```{r}
+svy_0 %>% 
+  subset(E_COVID_W77 %in% c("Employed full-time", "Employed part-time")) %>%
+  tbl_svysummary(by = "F_GENDER", include = "CVCHILDCARE_W77", percent = "col")
+```
+
+### `WLBALANCE1`
+
+>  How difficult, if at all, would you say it is for you personally to balance the responsibilities of your job with the responsibilities of your family?
+
+```{r}
+svy_0 %>% 
+  subset(E_COVID_W77 %in% c("Employed full-time", "Employed part-time")) %>%
+  tbl_svysummary(by = "F_GENDER", include = "WLBALANCE1_W77", percent = "col")
+```
+
+## Exploration: Validation with Reports
+
+Pew produced several reports from this survey. To make sure I understand the data correctly, this section reproduces some of their important results.
+
+In [A rising share of working parents in the U.S. say it’s been difficult to handle child care during the pandemic](https://www.pewresearch.org/fact-tank/2021/01/26/a-rising-share-of-working-parents-in-the-u-s-say-its-been-difficult-to-handle-child-care-during-the-pandemic/), Pew writes 
+
+> Overall, about half of employed parents with children younger than 12 in the household (52%) say it has been difficult to handle child care responsibilities during the coronavirus outbreak... Both working mothers and fathers with children younger than 12 are more likely than they were earlier in the pandemic to say it’s been difficult to handle child care responsibilities. But as was the case in March, larger shares of mothers than fathers say this (57% vs. 47%).
+
+```{r fig.height=3.5, fig.width=6.5, warning=FALSE}
+freq_by_gender <- function(dat, freq_var) {
+  dat %>% 
+    group_by(F_GENDER, !!sym(freq_var)) %>%
+    summarize(.groups = "drop", wt = sum(WEIGHT_W77), n = n()) %>%
+    group_by(F_GENDER) %>%
+    mutate(pct = wt / sum(wt)) %>%
+    ungroup()
+}
+
+dat_working_parent <- dat_0 %>% 
+  filter(
+    E_COVID_W77 %in% c("Employed full-time", "Employed part-time") &
+      CHILD_LT12_W77 == "Yes" &
+      F_GENDER %in% c("A man", "A woman")
+  ) 
+
+fig1_dat <- dat_working_parent %>% 
+  filter(CVCHILDCARE_W77 != "Refused") %>%
+  freq_by_gender("CVCHILDCARE_W77")
+
+fig1_total <- dat_working_parent %>% 
+  filter(CVCHILDCARE_W77 != "Refused") %>%
+  mutate(F_GENDER = "(total)") %>%
+  freq_by_gender("CVCHILDCARE_W77")
+
+fig1_na <- fig1_total %>% mutate(F_GENDER = "NA", pct = NA_real_)
+
+palette_easy <- c("darkseagreen", "darkseagreen2", "lightgoldenrod", "lightgoldenrod3", "#FFFFFF")
+names(palette_easy) <- levels(dat_0$CVCHILDCARE_W77)
+
+bind_rows(fig1_dat, fig1_total, fig1_na) %>%
+  mutate(F_GENDER = factor(F_GENDER, levels = c("(total)", "NA", "A man", "A woman"),
+                           labels = c("All Working Parents with Children under 12", 
+                                      " ", "Fathers", "Mothers")),
+         CVCHILDCARE_W77 = fct_relevel(CVCHILDCARE_W77, "Somewhat difficult", after = 3)) %>% 
+  ggplot(aes(x = if_else(str_detect(CVCHILDCARE_W77, "easy"), -pct, +pct), 
+             y = fct_rev(F_GENDER),
+             fill = CVCHILDCARE_W77)) +
+  geom_col() +
+  geom_text(aes(label = percent(pct, 1)), position = position_stack(vjust = .5)) +
+  geom_hline(yintercept = " ", linetype = 2, color = "lightgray") +
+  geom_vline(xintercept = 0, linetype = 1, color = "lightgray") +
+  scale_fill_manual(values = palette_easy[1:4]) +
+  scale_y_discrete(labels = wrap_format(18)) +
+  theme_light() +
+  theme(legend.position = "top",
+        panel.grid = element_blank(),
+        axis.text.x = element_blank(),
+        axis.ticks.x = element_blank()) +
+  labs(x = NULL, y = NULL, fill = NULL,
+       title = "Mothers are more likely to say handling child care is difficult.",
+       subtitle = str_wrap("Among employed parents with children under 12 at home, % saying it has been ____ to handle child care responsibilities.", 70))
+```
+
+## Save Data
+
+Save the refined data set to a file for subsequent steps.
+
+```{r}
+saveRDS(dat_0, "../data/1_data_mgmt.rds")
+```
