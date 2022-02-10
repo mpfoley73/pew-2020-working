@@ -29,6 +29,12 @@ pew_dat <- readRDS("../data/1_get_data.rds")
 
 # introduction
 
+```{r fig.width=4.5, fig.height=5, out.extra='style="float:right; padding:10px"'}
+rq01$plot
+```
+
+
+
 # methods
 
 # results

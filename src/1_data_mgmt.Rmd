@@ -43,8 +43,8 @@ I did not find a codebook associated with the descriptive fields, so I'm going t
 
 Most demographic variables are self-explanatory from the variable name or from the response options. A few need explanation.
 
-* `XKIDS1_W77`: PARENTS OF CHILDREN UNDER 18.
-* `XPARENT_W77`: PARENTS OF CHILDREN UNDER 18 *LIVING IN HOUSEHOLD* (*No* could mean they are not parents of children under 18, or they are parents of children under 18 but the children are not living in in the household.)
+* `XKIDS1_W77`: PARENT OF CHILD <18, REGARDLESS OF WHETHER CHILD IS IN HOUSEHOLD.
+* `XPARENT_W77`: PARENT WITH CHILD <18 IN HOUSEHOLD
 
 ```{r}
 svy_0 %>% gtsummary::tbl_svysummary(
@@ -55,13 +55,15 @@ svy_0 %>% gtsummary::tbl_svysummary(
 
 ## Questions
 
-You can read all of the questions and response options in the [questionnaire](file:///C:/Users/mpfol/AppData/Local/Temp/Temp1_W77_Oct20.zip/W77_Oct20/ATP%20W77%20questionnaire.pdf). I am particularly interested in questions related to how spouses share family responsibilities.
+You can read all of the questions and response options in the [questionnaire](file:///C:/Users/mpfol/AppData/Local/Temp/Temp1_W77_Oct20.zip/W77_Oct20/ATP%20W77%20questionnaire.pdf). I am particularly interested in questions related to how spouses share family responsibilities. In each query below, I filter on `E_COVID_W77 %in% c("Employed full-time", "Employed part-time")`.
 
-### `FAMSURV1`
+### `FAMSURV1_W77`
+
+All survey participants were asked,
 
 > At this point in your life, which of the following would be best for you personally? 
 
-```{r}
+```{r class.source = 'fold-show'}
 svy_0 %>% 
   subset(E_COVID_W77 %in% c("Employed full-time", "Employed part-time")) %>%
   tbl_svysummary(by = "F_GENDER", include = "FAMSURV1_W77", percent = "col")
@@ -201,11 +203,7 @@ svy_0 %>%
 
 Pew produced several reports from this survey. To make sure I understand the data correctly, this section reproduces some of their important results.
 
-In [A rising share of working parents in the U.S. say it’s been difficult to handle child care during the pandemic](https://www.pewresearch.org/fact-tank/2021/01/26/a-rising-share-of-working-parents-in-the-u-s-say-its-been-difficult-to-handle-child-care-during-the-pandemic/), Pew writes 
-
-> Overall, about half of employed parents with children younger than 12 in the household (52%) say it has been difficult to handle child care responsibilities during the coronavirus outbreak... Both working mothers and fathers with children younger than 12 are more likely than they were earlier in the pandemic to say it’s been difficult to handle child care responsibilities. But as was the case in March, larger shares of mothers than fathers say this (57% vs. 47%).
-
-```{r fig.height=3.5, fig.width=6.5, warning=FALSE}
+```{r}
 freq_by_gender <- function(dat, freq_var) {
   dat %>% 
     group_by(F_GENDER, !!sym(freq_var)) %>%
@@ -214,27 +212,44 @@ freq_by_gender <- function(dat, freq_var) {
     mutate(pct = wt / sum(wt)) %>%
     ungroup()
 }
+```
 
+### Figure #1: `CVCHILDCARE`
+
+In Pew's Jan 2021 publication, [A rising share of working parents in the U.S. say it’s been difficult to handle child care during the pandemic](https://www.pewresearch.org/fact-tank/2021/01/26/a-rising-share-of-working-parents-in-the-u-s-say-its-been-difficult-to-handle-child-care-during-the-pandemic/), Pew writes 
+
+> Overall, about half of employed parents with children younger than 12 in the household (52%) say it has been difficult to handle child care responsibilities during the coronavirus outbreak... Both working mothers and fathers with children younger than 12 are more likely than they were earlier in the pandemic to say it’s been difficult to handle child care responsibilities. But as was the case in March, larger shares of mothers than fathers say this (57% vs. 47%).
+
+```{r fig.height=3.5, fig.width=6.5, warning=FALSE}
 dat_working_parent <- dat_0 %>% 
   filter(
-    E_COVID_W77 %in% c("Employed full-time", "Employed part-time") &
-      CHILD_LT12_W77 == "Yes" &
-      F_GENDER %in% c("A man", "A woman")
-  ) 
+    # excludes "retired" and "not employed"
+    E_COVID_W77 %in% c("Employed full-time", "Employed part-time") & 
+    # excludes "More than one and do not consider any of them my primary job"
+    JOBNUM_W77 %in% c("One", "More than one, but consider one of them my primary job") &
+    # parent or guardian of any children under the age of 12 who live in household
+    CHILD_LT12_W77 == "Yes" 
+  )
 
+# CVCHILDCARE_W77: How easy or difficult has it been for you to handle child 
+# care responsibilities during the coronavirus outbreak?
 fig1_dat <- dat_working_parent %>% 
-  filter(CVCHILDCARE_W77 != "Refused") %>%
-  freq_by_gender("CVCHILDCARE_W77")
+  freq_by_gender("CVCHILDCARE_W77") %>%
+  # refusing to answer excluded from display, but not from calc, so filter 
+  # _after_ calculation.
+  filter(CVCHILDCARE_W77 != "Refused" & F_GENDER %in% c("A man", "A woman")) %>%
+  mutate(CVCHILDCARE_W77 = fct_drop(CVCHILDCARE_W77))
 
 fig1_total <- dat_working_parent %>% 
-  filter(CVCHILDCARE_W77 != "Refused") %>%
   mutate(F_GENDER = "(total)") %>%
-  freq_by_gender("CVCHILDCARE_W77")
+  freq_by_gender("CVCHILDCARE_W77") %>%
+  filter(CVCHILDCARE_W77 != "Refused") %>%
+  mutate(CHILDHOME_W77 = fct_drop(CVCHILDCARE_W77))
 
 fig1_na <- fig1_total %>% mutate(F_GENDER = "NA", pct = NA_real_)
 
-palette_easy <- c("darkseagreen", "darkseagreen2", "lightgoldenrod", "lightgoldenrod3", "#FFFFFF")
-names(palette_easy) <- levels(dat_0$CVCHILDCARE_W77)
+palette_fig1 <- c("darkseagreen", "darkseagreen2", "lightgoldenrod", "lightgoldenrod3")
+names(palette_fig1) <- levels(fig1_dat$CVCHILDCARE_W77)
 
 bind_rows(fig1_dat, fig1_total, fig1_na) %>%
   mutate(F_GENDER = factor(F_GENDER, levels = c("(total)", "NA", "A man", "A woman"),
@@ -248,7 +263,7 @@ bind_rows(fig1_dat, fig1_total, fig1_na) %>%
   geom_text(aes(label = percent(pct, 1)), position = position_stack(vjust = .5)) +
   geom_hline(yintercept = " ", linetype = 2, color = "lightgray") +
   geom_vline(xintercept = 0, linetype = 1, color = "lightgray") +
-  scale_fill_manual(values = palette_easy[1:4]) +
+  scale_fill_manual(values = palette_fig1[1:4]) +
   scale_y_discrete(labels = wrap_format(18)) +
   theme_light() +
   theme(legend.position = "top",
@@ -257,7 +272,172 @@ bind_rows(fig1_dat, fig1_total, fig1_na) %>%
         axis.ticks.x = element_blank()) +
   labs(x = NULL, y = NULL, fill = NULL,
        title = "Mothers are more likely to say handling child care is difficult.",
-       subtitle = str_wrap("Among employed parents with children under 12 at home, % saying it has been ____ to handle child care responsibilities.", 70))
+       subtitle = str_wrap("Among employed parents with children under 12 at home, % saying it has been ____ to handle child care responsibilities.", 70),
+       caption = "Note: Share of respondents who did not answer not shown.")
+```
+
+### Figure #2: `CHILDHOME`
+
+Next in Pew's Jan 2021 publication, Pew writes 
+
+> Among employed parents who are working remotely all or most of the time and have children younger than 18 at home, about two-thirds (65%) say they have at least some child care responsibilities when working from home, including 26% who say they have a lot.
+>
+> Mothers and fathers who are working from home all or most of the time are equally likely to say they have at least some child care responsibilities while working from home (66% vs. 65%), though moms are about twice as likely as dads to say they have a lot of these duties (36% vs. 16%).
+
+```{r fig.height=4.0, fig.width=6.5, warning=FALSE}
+dat_working_parent_18_wfh <- dat_0 %>% 
+  filter(
+    # excludes "retired" and "not employed"
+    E_COVID_W77 %in% c("Employed full-time", "Employed part-time") & 
+    # excludes "More than one and do not consider any of them my primary job"
+    JOBNUM_W77 %in% c("One", "More than one, but consider one of them my primary job") &
+    # parent or guardian of any children under the age of 18 who live in household
+    XPARENT_W77 == "Yes" &
+    # working from home
+    WFHCURR_W77 %in% c("All of the time", "Most of the time")
+  ) 
+
+# CVCHILDCARE_W77: How easy or difficult has it been for you to handle child 
+# care responsibilities during the coronavirus outbreak?
+fig2_dat <- dat_working_parent_18_wfh %>% 
+  freq_by_gender("CHILDHOME_W77") %>%
+  # refusing to answer excluded from display, but not from calc, so filter 
+  # _after_ calculation.
+  filter(CHILDHOME_W77 != "Refused" & F_GENDER %in% c("A man", "A woman"))  %>%
+  mutate(CHILDHOME_W77 = fct_drop(CHILDHOME_W77))
+
+fig2_total <- dat_working_parent_18_wfh %>% 
+  mutate(F_GENDER = "(total)") %>%
+  freq_by_gender("CHILDHOME_W77") %>%
+  filter(CHILDHOME_W77 != "Refused") %>%
+  mutate(CHILDHOME_W77 = fct_drop(CHILDHOME_W77))
+
+fig2_na <- fig2_total %>% mutate(F_GENDER = "NA", pct = NA_real_)
+fig2_na2 <- fig2_total %>% mutate(F_GENDER = "NA2", pct = NA_real_)
+# fig2_na2$CHILDHOME_W77 <- c("Total", "Not much or None", "Some or a lot", "Total")
+# fig2_na2$pct <- c(-.5, -.3, +.3, +.8)
+
+fig2_posneg <- bind_rows(fig2_dat, fig2_total, fig2_na, fig2_na2) %>%
+  mutate(CHILDHOME_W77 = fct_collapse(CHILDHOME_W77, 
+                                      `Some or a lot` = c("Some", "A lot"),
+                                      `Not much or None` = c("Not much", "None at all"))) %>%
+  group_by(F_GENDER, CHILDHOME_W77) %>%
+  summarise(.groups = "drop", across(wt:pct, sum)) %>%
+  mutate(F_GENDER = factor(F_GENDER, levels = c("NA2", "(total)", "NA", "A man", "A woman"),
+                           labels = c("  ", "All Teleworking Parents", 
+                                      " ", "Fathers", "Mothers")))
+
+palette_fig2 <- c("darkseagreen", "darkseagreen2", "lightgoldenrod", "lightgoldenrod3")
+names(palette_fig2) <- levels(fig2_dat$CHILDHOME_W77)
+
+bind_rows(fig2_dat, fig2_total, fig2_na, fig2_na2) %>%
+  mutate(F_GENDER = factor(F_GENDER, levels = c("NA2", "(total)", "NA", "A man", "A woman"),
+                           labels = c("  ", "All Teleworking Parents", 
+                                      " ", "Fathers", "Mothers")),
+         CHILDHOME_W77 = fct_relevel(CHILDHOME_W77, "Some", after = 3)) %>% 
+  ggplot(aes(x = if_else(CHILDHOME_W77 %in% c("Not much", "None at all"), -pct, +pct), 
+             y = fct_rev(F_GENDER),
+             fill = CHILDHOME_W77)) +
+  geom_col() +
+  geom_text(aes(label = percent(pct, 1)), position = position_stack(vjust = .5)) +
+  geom_text(data = fig2_posneg, aes(x = if_else(CHILDHOME_W77 == "Not much or None", -.5, +.8),
+                                    label = percent(pct, 1)), size = 3, fontface = "bold") +
+  geom_hline(yintercept = " ", linetype = 2, color = "lightgray") +
+  geom_vline(xintercept = 0, linetype = 1, color = "lightgray") +
+  scale_fill_manual(values = palette_fig2[1:4]) +
+  scale_y_discrete(labels = wrap_format(18)) +
+  theme_light() +
+  theme(legend.position = "top",
+        panel.grid = element_blank(),
+        axis.text.x = element_blank(),
+        axis.ticks.x = element_blank()) +
+  guides(fill = guide_legend(reverse = TRUE)) +
+  labs(x = NULL, y = NULL, fill = NULL,
+       title = str_wrap("Teleworking mothers twice as likely to say they have a lot of child care duties while working.", 70),
+       subtitle = str_wrap("Among teleworking parents with children under 18 at home, % saying they have ____ child care responsibilities when working from home.", 70),
+       caption = "Note: Share of respondents who did not answer not shown.") +
+  annotate("text", x = -.5, y = "  ", label = "Tot", size = 3, fontface = "bold",
+           hust = 0, color = "darkgoldenrod") +
+  annotate("text", x = +.8, y = "  ", label = "Tot", size = 3, fontface = "bold", 
+           hust = 0, color = "darkseagreen")
+```
+
+### Figure #4: `FAMSURV35`
+
+Pew writes 
+
+> When asked about some of the specific challenges they may have faced at work since the beginning of the coronavirus outbreak because they were balancing work and parenting responsibilities, roughly half of employed parents (49%) say they felt like they could not give 100% at work since the outbreak began and 30% say they needed to reduce their work hours. 
+
+```{r fig.height=4.5, fig.width=6.5, warning=FALSE}
+dat_working_parent_18 <- dat_0 %>% 
+  filter(
+    # excludes "retired" and "not employed"
+    E_COVID_W77 %in% c("Employed full-time", "Employed part-time") & 
+    # excludes "More than one and do not consider any of them my primary job"
+    JOBNUM_W77 %in% c("One", "More than one, but consider one of them my primary job") &
+    # parent or guardian of any children under the age of 18 who live in household
+    XPARENT_W77 == "Yes"
+  ) 
+
+# FAMSURV35_a_W77`: Needed to reduce your work hours
+fig4_dat_a <- dat_working_parent_18 %>% freq_by_gender("FAMSURV35_a_W77")
+fig4_total_a <- dat_working_parent_18 %>% mutate(F_GENDER = "(total)") %>% freq_by_gender("FAMSURV35_a_W77")
+# FAMSURV35_b_W77`: Felt like you couldn’t give 100% at work
+fig4_dat_b <- dat_working_parent_18 %>% freq_by_gender("FAMSURV35_b_W77") 
+fig4_total_b <- dat_working_parent_18 %>% mutate(F_GENDER = "(total)") %>% freq_by_gender("FAMSURV35_b_W77")
+# FAMSURV35_c_W77`: Turned down a promotion 
+fig4_dat_c <- dat_working_parent_18 %>% freq_by_gender("FAMSURV35_c_W77") 
+fig4_total_c <- dat_working_parent_18 %>% mutate(F_GENDER = "(total)") %>% freq_by_gender("FAMSURV35_c_W77")
+# FAMSURV35_d_W77`: Turned down an important assignment at work
+fig4_dat_d <- dat_working_parent_18 %>% freq_by_gender("FAMSURV35_d_W77") 
+fig4_total_d <- dat_working_parent_18 %>% mutate(F_GENDER = "(total)") %>% freq_by_gender("FAMSURV35_d_W77")
+
+fig4_dat <- bind_rows(
+  fig4_dat_a %>% filter(FAMSURV35_a_W77 == "Yes, have experienced this" & F_GENDER %in% c("A man", "A woman")) %>%
+    mutate(item = "Needed to reduce their work hours") %>% select(F_GENDER, item, pct),
+  fig4_dat_b %>% filter(FAMSURV35_b_W77 == "Yes, have experienced this" & F_GENDER %in% c("A man", "A woman")) %>%
+    mutate(item = "Felt like they couldn’t give 100% at work") %>% select(F_GENDER, item, pct),
+  fig4_dat_c %>% filter(FAMSURV35_c_W77 == "Yes, have experienced this" & F_GENDER %in% c("A man", "A woman")) %>%
+    mutate(item = "Turned down a promotion") %>% select(F_GENDER, item, pct),
+  fig4_dat_d %>% filter(FAMSURV35_d_W77 == "Yes, have experienced this" & F_GENDER %in% c("A man", "A woman")) %>%
+    mutate(item = "Turned down an important assignment at work") %>% select(F_GENDER, item, pct),
+) %>%
+  mutate(F_GENDER = fct_drop(F_GENDER))
+
+fig4_tot <- bind_rows(
+  fig4_total_a %>% filter(FAMSURV35_a_W77 == "Yes, have experienced this") %>%
+    mutate(item = "Needed to reduce their work hours") %>% select(F_GENDER, item, pct),
+  fig4_total_b %>% filter(FAMSURV35_b_W77 == "Yes, have experienced this") %>%
+    mutate(item = "Felt like they couldn’t give 100% at work") %>% select(F_GENDER, item, pct),
+  fig4_total_c %>% filter(FAMSURV35_c_W77 == "Yes, have experienced this") %>%
+    mutate(item = "Turned down a promotion") %>% select(F_GENDER, item, pct),
+  fig4_total_d %>% filter(FAMSURV35_d_W77 == "Yes, have experienced this") %>%
+    mutate(item = "Turned down an important assignment at work") %>% select(F_GENDER, item, pct),
+)
+
+palette_fig4_fill <- c("darkseagreen", "lightgoldenrod")
+names(palette_fig4_fill) <- levels(fig4_dat$F_GENDER)
+palette_fig4_color <- c("darkseagreen4", "goldenrod")
+names(palette_fig4_color) <- levels(fig4_dat$F_GENDER)
+
+fig4_dat %>%
+  ggplot(aes(x = pct, y = item)) +
+  geom_point(aes(color = F_GENDER, fill = F_GENDER), size = 5, shape = 21) +
+  geom_text(aes(label = percent(pct, 1)), vjust = -1, size = 3) +
+  scale_fill_manual(values = palette_fig4_fill) +
+  scale_color_manual(values = palette_fig4_color) +
+  scale_y_discrete(labels = wrap_format(15)) +
+  theme_light() +
+  theme(legend.position = "top",
+        panel.grid = element_blank(),
+        panel.grid.major.y = element_line(color = "gray80", size = 1, linetype = 1),
+        axis.text.x = element_blank(),
+        axis.ticks.x = element_blank()) +
+  guides(color = FALSE) +
+  labs(x = NULL, y = NULL, fill = NULL, color = NULL,
+       title = str_wrap("Working mothers more likely to say they are struggling at work during pandemic.", 65),
+       subtitle = str_wrap("Among employed parents with children under 18 at home, % saying that since the beginning of the coronavirus outbreak, they have personally exeperienced the following.", 75),
+       caption = "Note: Share of respondents who did not answer not shown.")
 ```
 
 ## Save Data

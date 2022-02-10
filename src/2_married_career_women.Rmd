@@ -1,0 +1,725 @@
+---
+title: "Married Career Women Struggling More with Work-Life Balance"
+subtitle: "Analysis of Responses to October 2020 Pew Survey."
+author: "Michael Foley"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    css: "style.css"
+    theme: flatly
+    toc: true
+    toc_float: true
+    highlight: haddock
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+
+library(tidyverse)
+library(scales)
+library(patchwork)
+library(janitor)
+library(kableExtra)
+library(questionr)
+library(survey)
+library(gtsummary)
+library(equatiomatic)
+
+set_gtsummary_theme(theme_gtsummary_compact())
+
+theme_rq <- theme(
+  panel.grid = element_blank(),
+  strip.background = element_rect(fill = "slategray"),
+  legend.position = "none",
+  axis.ticks.x = element_blank(),
+  plot.title = element_text(face = "bold", color = "black", size = 11),
+  plot.subtitle = element_text(face = "italic", color = "gray40", size = 9),
+  plot.title.position = "plot",
+  plot.caption = element_text(color = "gray60")
+)
+
+parent_labels <- c("Fathers", "Mothers")
+
+palette_parent <- c("slategray2", "sienna2")
+names(palette_parent) <- parent_labels
+```
+
+```{r}
+# For all sections of this analysis, the general population is the same:
+# Married or cohabiting parents of children <18 living in household
+dat <- readRDS("../data/1_data_mgmt.rds") %>%
+  filter(
+    # Parent of children <18 living in household
+    XPARENT_W77 == "Yes",
+    # excludes divorced, separated, widowed, never married, and refused
+    XMARITAL_W77 == "Has spouse or partner",
+    # excludes "in some other way" and "Refused"
+    F_GENDER %in% c("A man", "A woman"),
+  ) %>%
+  mutate(
+    F_GENDER = factor(F_GENDER, 
+                      levels = c("A man", "A woman"), 
+                      labels = c("Fathers", "Mothers"))
+  )
+
+# Most sections additionally require that both parents be employed full-time.
+dat_ft <- dat %>%
+  filter(
+    E_COVID_W77 == "Employed full-time",
+    E_COVIDPARTNER_W77 == "Employed full-time",
+    JOBNUM_W77 %in% c("One", "More than one, but consider one of them my primary job")
+  )
+```
+
+```{r rq01}
+# Research Question 1: FAMSURV1_W77
+#
+# At this point in your life, which of the following would be best for you 
+# personally? (working full time, part-time, not working)
+
+rq01 <- list()
+
+rq01$dat <- dat %>%
+  filter(
+    # Employment status (full-time, part-time, retired, not employed)
+    E_COVID_W77 != "Refused",
+    FAMSURV1_W77 != "Refused"
+  ) %>%
+  mutate(
+    E_COVID_W77 = fct_drop(E_COVID_W77),
+    FAMSURV1_W77 = fct_drop(FAMSURV1_W77)
+  )
+
+rq01$svy <- svydesign(ids = ~1, weights = ~ WEIGHT_W77, data = rq01$dat) 
+
+rq01$svy_tbl_E_COVID_W77 <- svytable(~E_COVID_W77+F_GENDER, design = rq01$svy)
+rq01$svy_tbl_FAMSURV1_W77 <- svytable(~FAMSURV1_W77+F_GENDER, design = rq01$svy)
+
+rq01$gt_tbl <- tbl_svysummary(
+  rq01$svy, 
+  by = F_GENDER,
+  include = c(E_COVID_W77, FAMSURV1_W77),
+  label = list(
+    E_COVID_W77 ~ "Employment Status",
+    FAMSURV1_W77 ~ "Best for you Personally"
+  )
+) %>%
+  add_overall() %>%
+  add_p()
+
+# Chisq Test
+rq01$chisq_E_COVID_W77 <- svychisq(~E_COVID_W77+F_GENDER, design = rq01$svy, statistic = "Chisq") 
+rq01$chisq_FAMSURV1_W77 <- svychisq(~FAMSURV1_W77+F_GENDER, design = rq01$svy, statistic = "Chisq") 
+
+# Cramer's V
+rq01$cramers_v_E_COVID_W77 <- sqrt(
+  (rq01$chisq_E_COVID_W77$statistic / sum(rq01$svy_tbl_E_COVID_W77)) / 
+    (min(dim(rq01$svy_tbl_E_COVID_W77)) - 1))
+rq01$cramers_v_FAMSURV1_W77 <- sqrt(
+  (rq01$chisq_FAMSURV1_W77$statistic / sum(rq01$svy_tbl_FAMSURV1_W77)) /
+    (min(dim(rq01$svy_tbl_FAMSURV1_W77)) - 1))
+
+# Tibbles
+rq01$tibble_E_COVID_W77 <- rq01$svy_tbl_E_COVID_W77 %>% 
+  as_tibble() %>% group_by(F_GENDER) %>% mutate(pct = n / sum(n)) %>% ungroup()
+rq01$tibble_FAMSURV1_W77 <- rq01$svy_tbl_FAMSURV1_W77 %>% 
+  as_tibble() %>% group_by(F_GENDER) %>% mutate(pct = n / sum(n)) %>% ungroup()
+
+# Plot
+rq01$plot_E_COVID_W77 <- rq01$tibble_E_COVID_W77 %>%
+  ggplot(aes(y = F_GENDER, x = pct)) +
+  geom_col(aes(fill = F_GENDER), color = "gray80", width = .8) +
+  geom_text(aes(group = F_GENDER, 
+                label = scales::percent(pct, 1),
+                x = pct + if_else(pct < .06, .08, 0)),
+            nudge_x = -.04, size = 3) +
+  facet_grid(rows = vars(E_COVID_W77), switch = "y", 
+             labeller = label_wrap_gen(width = 12, multi_line = TRUE)) +
+  scale_x_continuous(labels = NULL) +
+  scale_y_discrete(labels = NULL) +
+  labs(x = NULL, y = NULL, fill = NULL,
+       title = str_wrap("In two-parent households, mothers are less likely to work than fathers.", 80),
+       subtitle = str_wrap("Employment status among married or cohabiting parents with children under 18 at home.", 95),
+       caption = "Source: Pew survey of U.S. adults conducted Oct. 13-19, 2020.") +
+  theme_light() +
+  theme_rq +
+  theme(strip.text.y.left = element_text(angle = 0),
+        legend.position = "top",
+        axis.ticks.y = NULL) +
+  guides(fill = guide_legend(reverse = TRUE)) +
+  scale_fill_manual(values = palette_parent)
+```
+
+```{r rq02}
+# Research Question 2: FAMSURV35
+#
+# Since the beginning of the coronavirus outbreak, have you personally 
+# experienced the following because you were balancing work and parenting 
+# responsibilities?
+# a (FAMSURV35_a_W77). Needed to reduce your work hours
+# b (FAMSURV35_b_W77). Felt like you couldn’t give 100% at work 
+# c (FAMSURV35_c_W77). Turned down a promotion
+# d (FAMSURV35_d_W77). Turned down an important assignment at work
+
+rq02 <- list()
+
+rq02$dat <- dat_ft %>% 
+  filter(
+    # Respondent answered relevant questions.
+    FAMSURV35_a_W77 != "Refused",
+    FAMSURV35_b_W77 != "Refused",
+    FAMSURV35_c_W77 != "Refused",
+    FAMSURV35_d_W77 != "Refused",
+  ) %>%
+  mutate(
+    FAMSURV35_a_W77 = factor(FAMSURV35_a_W77, 
+                             levels = c("No, have not experienced this", "Yes, have experienced this"), 
+                             labels = c("No", "Yes")),
+    FAMSURV35_b_W77 = factor(FAMSURV35_b_W77, 
+                             levels = c("No, have not experienced this", "Yes, have experienced this"), 
+                             labels = c("No", "Yes")),
+    FAMSURV35_c_W77 = factor(FAMSURV35_c_W77, 
+                             levels = c("No, have not experienced this", "Yes, have experienced this"), 
+                             labels = c("No", "Yes")),
+    FAMSURV35_d_W77 = factor(FAMSURV35_d_W77, 
+                             levels = c("No, have not experienced this", "Yes, have experienced this"), 
+                             labels = c("No", "Yes")),
+  )
+
+rq02$svy <- svydesign(ids = ~1, weights = ~ WEIGHT_W77, data = rq02$dat) 
+
+rq02$svy_tbl_FAMSURV35_a_W77 <- svytable(~FAMSURV35_a_W77+F_GENDER, design = rq02$svy)
+rq02$svy_tbl_FAMSURV35_b_W77 <- svytable(~FAMSURV35_b_W77+F_GENDER, design = rq02$svy)
+rq02$svy_tbl_FAMSURV35_c_W77 <- svytable(~FAMSURV35_c_W77+F_GENDER, design = rq02$svy)
+rq02$svy_tbl_FAMSURV35_d_W77 <- svytable(~FAMSURV35_d_W77+F_GENDER, design = rq02$svy)
+
+rq02$gt_tbl <- tbl_svysummary(
+  rq02$svy, 
+  by = F_GENDER,
+  include = c(FAMSURV35_a_W77, FAMSURV35_b_W77, FAMSURV35_c_W77, FAMSURV35_d_W77), 
+  label = list(
+    FAMSURV35_a_W77 ~ "Needed to reduce work hours",
+    FAMSURV35_b_W77 ~ "Couldn\'t give 100% at work",
+    FAMSURV35_c_W77 ~ "Turned down a promotion",
+    FAMSURV35_d_W77 ~ "Turned down work assignment")
+) %>%
+  add_overall() %>%
+  add_p()
+
+# Chisq Test
+rq02$chisq_FAMSURV35_a_W77 <- svychisq(~FAMSURV35_a_W77+F_GENDER, design = rq02$svy, statistic = "Chisq") 
+rq02$chisq_FAMSURV35_b_W77 <- svychisq(~FAMSURV35_b_W77+F_GENDER, design = rq02$svy, statistic = "Chisq") 
+rq02$chisq_FAMSURV35_c_W77 <- svychisq(~FAMSURV35_c_W77+F_GENDER, design = rq02$svy, statistic = "Chisq") 
+rq02$chisq_FAMSURV35_d_W77 <- svychisq(~FAMSURV35_d_W77+F_GENDER, design = rq02$svy, statistic = "Chisq") 
+
+# Cramer's V
+rq02$cramers_v_FAMSURV35_a_W77 <- sqrt(
+  (rq02$chisq_FAMSURV35_a_W77$statistic / sum(rq02$svy_tbl_FAMSURV35_a_W77)) / 
+    (min(dim(rq02$svy_tbl_FAMSURV35_a_W77)) - 1))
+rq02$cramers_v_FAMSURV35_b_W77 <- sqrt(
+  (rq02$chisq_FAMSURV35_b_W77$statistic / sum(rq02$svy_tbl_FAMSURV35_b_W77)) / 
+    (min(dim(rq02$svy_tbl_FAMSURV35_b_W77)) - 1))
+rq02$cramers_v_FAMSURV35_c_W77 <- sqrt(
+  (rq02$chisq_FAMSURV35_c_W77$statistic / sum(rq02$svy_tbl_FAMSURV35_c_W77)) / 
+    (min(dim(rq02$svy_tbl_FAMSURV35_c_W77)) - 1))
+rq02$cramers_v_FAMSURV35_d_W77 <- sqrt(
+  (rq02$chisq_FAMSURV35_d_W77$statistic / sum(rq02$svy_tbl_FAMSURV35_d_W77)) / 
+    (min(dim(rq02$svy_tbl_FAMSURV35_d_W77)) - 1))
+
+# GLMs (predicred values for figures. Could use EMMs too.)
+rq02$glm_FAMSURV35_a_W77 <- svyglm(FAMSURV35_a_W77 ~ F_GENDER, family = "quasibinomial", design = rq02$svy)
+rq02$glm_FAMSURV35_b_W77 <- svyglm(FAMSURV35_b_W77 ~ F_GENDER, family = "quasibinomial", design = rq02$svy)
+rq02$glm_FAMSURV35_c_W77 <- svyglm(FAMSURV35_c_W77 ~ F_GENDER, family = "quasibinomial", design = rq02$svy)
+rq02$glm_FAMSURV35_d_W77 <- svyglm(FAMSURV35_d_W77 ~ F_GENDER, family = "quasibinomial", design = rq02$svy)
+
+tmp_data <- data.frame(F_GENDER = c("Mothers", "Fathers"))
+
+rq02$preds <- bind_rows(
+  predict(rq02$glm_FAMSURV35_a_W77, newdata = tmp_data, type = "response") %>%
+    as_tibble() %>% mutate(item = "Needed to reduce work hours") %>% bind_cols(tmp_data),
+  predict(rq02$glm_FAMSURV35_b_W77, newdata = tmp_data, type = "response") %>%
+    as_tibble() %>% mutate(item = "Couldn\'t give 100% at work") %>% bind_cols(tmp_data),
+  predict(rq02$glm_FAMSURV35_c_W77, newdata = tmp_data, type = "response") %>%
+    as_tibble() %>% mutate(item = "Turned down a promotion") %>% bind_cols(tmp_data),
+  predict(rq02$glm_FAMSURV35_d_W77, newdata = tmp_data, type = "response") %>%
+    as_tibble() %>% mutate(item = "Turned down work assignment") %>% bind_cols(tmp_data)
+) %>%
+  mutate(
+    lcl = map2_dbl(response, SE, ~qnorm(.025, mean = .x, sd = .y)),
+    ucl = map2_dbl(response, SE, ~qnorm(.975, mean = .x, sd = .y))
+  )
+
+# Tibbles
+rq02$tibble_FAMSURV35_a_W77 <- rq02$svy_tbl_FAMSURV35_a_W77 %>% 
+  as_tibble() %>% group_by(F_GENDER) %>% mutate(pct = n / sum(n)) %>% ungroup()
+rq02$tibble_FAMSURV35_b_W77 <- rq02$svy_tbl_FAMSURV35_b_W77 %>% 
+  as_tibble() %>% group_by(F_GENDER) %>% mutate(pct = n / sum(n)) %>% ungroup()
+rq02$tibble_FAMSURV35_c_W77 <- rq02$svy_tbl_FAMSURV35_c_W77 %>% 
+  as_tibble() %>% group_by(F_GENDER) %>% mutate(pct = n / sum(n)) %>% ungroup()
+rq02$tibble_FAMSURV35_d_W77 <- rq02$svy_tbl_FAMSURV35_d_W77 %>% 
+  as_tibble() %>% group_by(F_GENDER) %>% mutate(pct = n / sum(n)) %>% ungroup()
+
+rq02$plot <- rq02$preds %>%
+  ggplot(aes(y = item, x = response)) +
+  geom_point(aes(fill = F_GENDER), color = "gray80", shape = 21, size = 4) +
+  geom_errorbar(aes(xmin = lcl, xmax = ucl, color = F_GENDER), width = .1, show.legend = FALSE) +
+  geom_text(aes(group = F_GENDER, label = scales::percent(response, 1)), nudge_y = .2, size = 3) +
+  scale_x_continuous(labels = NULL) +
+  scale_y_discrete(labels = wrap_format(20)) +
+  labs(x = NULL, y = NULL, fill = NULL, color = NULL,
+       title = str_wrap("When both parents work full-time, mothers struggle with career more than fathers.", 100),
+       subtitle = str_wrap("Four measures of struggle among married or cohabiting parents working full-time with children under 18 at home.", 120),
+       caption = "Source: Pew survey of U.S. adults conducted Oct. 13-19, 2020.") +
+  theme_light() +
+  theme_rq +
+  theme(legend.position = "top") +
+  guides(fill = guide_legend(reverse = FALSE, title = NULL)) +
+  scale_color_manual(values = palette_parent) +
+  scale_fill_manual(values = palette_parent)
+```
+
+```{r rq03}
+# Research Question 3: FAMSURV36
+#
+# Since the beginning of the coronavirus outbreak, have you personally 
+# experienced the following at work because you have children?
+# a. (FAMSURV36_a_W77): Being passed over for a promotion
+# b. (FAMSURV36_b_W77): Being passed over for an important assignment
+# c. (FAMSURV36_c_W77): Being treated as if you weren’t committed to your work
+
+rq03 <- list()
+
+rq03$dat <- dat_ft %>% 
+  filter(
+    # Respondent answered relevant questions.
+    FAMSURV36_a_W77 != "Refused",
+    FAMSURV36_b_W77 != "Refused",
+    FAMSURV36_c_W77 != "Refused"
+  ) %>%
+  mutate(
+    FAMSURV36_a_W77 = factor(FAMSURV36_a_W77, 
+                             levels = c("No, have not experienced this", "Yes, have experienced this"), 
+                             labels = c("No", "Yes")),
+    FAMSURV36_b_W77 = factor(FAMSURV36_b_W77, 
+                             levels = c("No, have not experienced this", "Yes, have experienced this"), 
+                             labels = c("No", "Yes")),
+    FAMSURV36_c_W77 = factor(FAMSURV36_c_W77, 
+                             levels = c("No, have not experienced this", "Yes, have experienced this"), 
+                             labels = c("No", "Yes"))
+  )
+
+rq03$svy <- svydesign(ids = ~1, weights = ~ WEIGHT_W77, data = rq03$dat) 
+
+rq03$svy_tbl_FAMSURV36_a_W77 <- svytable(~FAMSURV36_a_W77+F_GENDER, design = rq03$svy)
+rq03$svy_tbl_FAMSURV36_b_W77 <- svytable(~FAMSURV36_b_W77+F_GENDER, design = rq03$svy)
+rq03$svy_tbl_FAMSURV36_c_W77 <- svytable(~FAMSURV36_c_W77+F_GENDER, design = rq03$svy)
+
+rq03$gt_tbl <- tbl_svysummary(
+  rq03$svy, 
+  by = F_GENDER,
+  include = c(FAMSURV36_a_W77, FAMSURV36_b_W77, FAMSURV36_c_W77), 
+  label = list(
+    FAMSURV36_a_W77 ~ "Passed over for a promotion",
+    FAMSURV36_b_W77 ~ "Passed over for an assignment",
+    FAMSURV36_c_W77 ~ "Treated as not committed to work"
+  )
+) %>%
+  add_overall() %>%
+  add_p()
+
+# Chisq Test
+rq03$chisq_FAMSURV36_a_W77 <- svychisq(~FAMSURV36_a_W77+F_GENDER, design = rq03$svy, statistic = "Chisq") 
+rq03$chisq_FAMSURV36_b_W77 <- svychisq(~FAMSURV36_b_W77+F_GENDER, design = rq03$svy, statistic = "Chisq") 
+rq03$chisq_FAMSURV36_c_W77 <- svychisq(~FAMSURV36_c_W77+F_GENDER, design = rq03$svy, statistic = "Chisq") 
+
+# Cramer's V
+rq03$cramers_v_FAMSURV36_a_W77 <- sqrt(
+  (rq03$chisq_FAMSURV36_a_W77$statistic / sum(rq03$svy_tbl_FAMSURV36_a_W77)) / 
+    (min(dim(rq03$svy_tbl_FAMSURV36_a_W77)) - 1))
+rq03$cramers_v_FAMSURV36_b_W77 <- sqrt(
+  (rq03$chisq_FAMSURV36_b_W77$statistic / sum(rq03$svy_tbl_FAMSURV36_b_W77)) / 
+    (min(dim(rq03$svy_tbl_FAMSURV36_b_W77)) - 1))
+rq03$cramers_v_FAMSURV36_c_W77 <- sqrt(
+  (rq03$chisq_FAMSURV36_c_W77$statistic / sum(rq03$svy_tbl_FAMSURV36_c_W77)) / 
+    (min(dim(rq03$svy_tbl_FAMSURV36_c_W77)) - 1))
+
+# GLMs (predicred values for figures. Could use EMMs too.)
+rq03$glm_FAMSURV36_a_W77 <- svyglm(FAMSURV36_a_W77 ~ F_GENDER, family = "quasibinomial", design = rq03$svy)
+rq03$glm_FAMSURV36_b_W77 <- svyglm(FAMSURV36_b_W77 ~ F_GENDER, family = "quasibinomial", design = rq03$svy)
+rq03$glm_FAMSURV36_c_W77 <- svyglm(FAMSURV36_c_W77 ~ F_GENDER, family = "quasibinomial", design = rq03$svy)
+
+tmp_data <- data.frame(F_GENDER = c("Mothers", "Fathers"))
+
+rq03$preds <- bind_rows(
+  predict(rq03$glm_FAMSURV36_a_W77, newdata = tmp_data, type = "response") %>%
+    as_tibble() %>% mutate(item = "Passed over for a promotion") %>% bind_cols(tmp_data),
+  predict(rq03$glm_FAMSURV36_b_W77, newdata = tmp_data, type = "response") %>%
+    as_tibble() %>% mutate(item = "Passed over for an assignment") %>% bind_cols(tmp_data),
+  predict(rq03$glm_FAMSURV36_c_W77, newdata = tmp_data, type = "response") %>%
+    as_tibble() %>% mutate(item = "Treated as not committed to work") %>% bind_cols(tmp_data)
+) %>%
+  mutate(
+    lcl = map2_dbl(response, SE, ~qnorm(.025, mean = .x, sd = .y)),
+    ucl = map2_dbl(response, SE, ~qnorm(.975, mean = .x, sd = .y))
+  )
+
+# Tibbles
+rq03$tibble_FAMSURV36_a_W77 <- rq03$svy_tbl_FAMSURV36_a_W77 %>% 
+  as_tibble() %>% group_by(F_GENDER) %>% mutate(pct = n / sum(n)) %>% ungroup()
+rq03$tibble_FAMSURV36_b_W77 <- rq03$svy_tbl_FAMSURV36_b_W77 %>% 
+  as_tibble() %>% group_by(F_GENDER) %>% mutate(pct = n / sum(n)) %>% ungroup()
+rq03$tibble_FAMSURV36_c_W77 <- rq03$svy_tbl_FAMSURV36_c_W77 %>% 
+  as_tibble() %>% group_by(F_GENDER) %>% mutate(pct = n / sum(n)) %>% ungroup()
+
+rq03$plot <- rq03$preds %>%
+  ggplot(aes(y = item, x = response)) +
+  geom_point(aes(fill = F_GENDER), color = "gray80", shape = 21, size = 4) +
+  geom_errorbar(aes(xmin = lcl, xmax = ucl, color = F_GENDER), width = .1, show.legend = FALSE) +
+  geom_text(aes(group = F_GENDER, label = scales::percent(response, 1)), nudge_y = .2, size = 3) +
+  scale_x_continuous(labels = NULL) +
+  scale_y_discrete(labels = wrap_format(20)) +
+  labs(x = NULL, y = NULL, fill = NULL, color = NULL,
+       title = str_wrap("When both parents work full-time, employers treat mothers as less committed than fathers.", 100),
+       subtitle = str_wrap("Three measures of employer evaluations among married or cohabiting parents working full-time with children under 18 at home.", 120),
+       caption = "Source: Pew survey of U.S. adults conducted Oct. 13-19, 2020.") +
+  theme_light() +
+  theme_rq +
+  theme(legend.position = "top") +
+  guides(fill = guide_legend(reverse = FALSE, title = NULL)) +
+  scale_color_manual(values = palette_parent) +
+  scale_fill_manual(values = palette_parent)
+```
+
+```{r rq04}
+# Research Question 3: FAMSURV38
+#
+# For each of the following, who would you say does more?
+#
+# a. (FAMSURV38_a_W77): Household chores and responsibilities
+# b. (FAMSURV38_b_W77): Managing household finances
+# c. (FAMSURV38_c_W77): Managing your child(ren)’s schedule and activities
+# d. (FAMSURV38_d_W77): Being an involved parent
+
+rq04 <- list()
+
+rq04$dat <- dat_ft %>% 
+  filter(
+    # Respondent answered relevant questions.
+    FAMSURV38_a_W77 != "Refused",
+    FAMSURV38_b_W77 != "Refused",
+    FAMSURV38_c_W77 != "Refused",
+    FAMSURV38_d_W77 != "Refused"
+  ) %>%
+  mutate(
+    FAMSURV38_a_W77 = factor(FAMSURV38_a_W77, 
+                             levels = c("Both about equally", 
+                                        "You do more than your spouse or partner",
+                                        "Your spouse or partner does more than you"), 
+                             labels = c("Equal", "I do more", "Spouse does more")),
+    FAMSURV38_b_W77 = factor(FAMSURV38_b_W77, 
+                             levels = c("Both about equally", 
+                                        "You do more than your spouse or partner",
+                                        "Your spouse or partner does more than you"), 
+                             labels = c("Equal", "I do more", "Spouse does more")),
+    FAMSURV38_c_W77 = factor(FAMSURV38_c_W77, 
+                             levels = c("Both about equally", 
+                                        "You do more than your spouse or partner",
+                                        "Your spouse or partner does more than you"), 
+                             labels = c("Equal", "I do more", "Spouse does more")),
+    FAMSURV38_d_W77 = factor(FAMSURV38_d_W77, 
+                             levels = c("Both about equally", 
+                                        "You do more than your spouse or partner",
+                                        "Your spouse or partner does more than you"), 
+                             labels = c("Equal", "I do more", "Spouse does more"))
+  )
+
+rq04$svy <- svydesign(ids = ~1, weights = ~ WEIGHT_W77, data = rq04$dat) 
+
+rq04$svy_tbl_FAMSURV38_a_W77 <- svytable(~FAMSURV38_a_W77+F_GENDER, design = rq04$svy)
+rq04$svy_tbl_FAMSURV38_b_W77 <- svytable(~FAMSURV38_b_W77+F_GENDER, design = rq04$svy)
+rq04$svy_tbl_FAMSURV38_c_W77 <- svytable(~FAMSURV38_c_W77+F_GENDER, design = rq04$svy)
+rq04$svy_tbl_FAMSURV38_d_W77 <- svytable(~FAMSURV38_d_W77+F_GENDER, design = rq04$svy)
+
+rq04$gt_tbl <- tbl_svysummary(
+  rq04$svy, 
+  by = F_GENDER,
+  include = c(FAMSURV38_a_W77, FAMSURV38_b_W77, FAMSURV38_c_W77, FAMSURV38_d_W77), 
+  label = list(
+    FAMSURV38_a_W77 ~ "Performing household chores",
+    FAMSURV38_b_W77 ~ "Managing household finances",
+    FAMSURV38_c_W77 ~ "Managing children schedule",
+    FAMSURV38_d_W77 ~ "Being an involved parent"
+  )
+) %>%
+  add_overall() %>%
+  add_p()
+
+# Chisq Test
+rq04$chisq_FAMSURV38_a_W77 <- svychisq(~FAMSURV38_a_W77+F_GENDER, design = rq04$svy, statistic = "Chisq") 
+rq04$chisq_FAMSURV38_b_W77 <- svychisq(~FAMSURV38_b_W77+F_GENDER, design = rq04$svy, statistic = "Chisq") 
+rq04$chisq_FAMSURV38_c_W77 <- svychisq(~FAMSURV38_c_W77+F_GENDER, design = rq04$svy, statistic = "Chisq") 
+rq04$chisq_FAMSURV38_d_W77 <- svychisq(~FAMSURV38_d_W77+F_GENDER, design = rq04$svy, statistic = "Chisq") 
+
+# Cramer's V
+rq04$cramers_v_FAMSURV38_a_W77 <- sqrt(
+  (rq04$chisq_FAMSURV38_a_W77$statistic / sum(rq04$svy_tbl_FAMSURV38_a_W77)) / 
+    (min(dim(rq04$svy_tbl_FAMSURV38_a_W77)) - 1))
+rq04$cramers_v_FAMSURV38_b_W77 <- sqrt(
+  (rq04$chisq_FAMSURV38_b_W77$statistic / sum(rq04$svy_tbl_FAMSURV38_b_W77)) / 
+    (min(dim(rq04$svy_tbl_FAMSURV38_b_W77)) - 1))
+rq04$cramers_v_FAMSURV38_c_W77 <- sqrt(
+  (rq04$chisq_FAMSURV38_c_W77$statistic / sum(rq04$svy_tbl_FAMSURV38_c_W77)) / 
+    (min(dim(rq04$svy_tbl_FAMSURV38_c_W77)) - 1))
+rq04$cramers_v_FAMSURV38_d_W77 <- sqrt(
+  (rq04$chisq_FAMSURV38_d_W77$statistic / sum(rq04$svy_tbl_FAMSURV38_d_W77)) / 
+    (min(dim(rq04$svy_tbl_FAMSURV38_d_W77)) - 1))
+
+# GLMs (predicred values for figures. Could use EMMs too.)
+rq04$glm_FAMSURV38_a_W77 <- svyglm(FAMSURV38_a_W77 ~ F_GENDER, family = "quasibinomial", design = rq04$svy)
+rq04$glm_FAMSURV38_b_W77 <- svyglm(FAMSURV38_b_W77 ~ F_GENDER, family = "quasibinomial", design = rq04$svy)
+rq04$glm_FAMSURV38_c_W77 <- svyglm(FAMSURV38_c_W77 ~ F_GENDER, family = "quasibinomial", design = rq04$svy)
+rq04$glm_FAMSURV38_d_W77 <- svyglm(FAMSURV38_d_W77 ~ F_GENDER, family = "quasibinomial", design = rq04$svy)
+
+tmp_data <- data.frame(F_GENDER = c("Mothers", "Fathers"))
+
+rq04$preds <- bind_rows(
+  predict(rq04$glm_FAMSURV38_a_W77, newdata = tmp_data, type = "response") %>%
+    as_tibble() %>% mutate(item = "Performing household chores") %>% bind_cols(tmp_data),
+  predict(rq04$glm_FAMSURV38_b_W77, newdata = tmp_data, type = "response") %>%
+    as_tibble() %>% mutate(item = "Managing household finances") %>% bind_cols(tmp_data),
+  predict(rq04$glm_FAMSURV38_c_W77, newdata = tmp_data, type = "response") %>%
+    as_tibble() %>% mutate(item = "Managing children schedule") %>% bind_cols(tmp_data),
+  predict(rq04$glm_FAMSURV38_d_W77, newdata = tmp_data, type = "response") %>%
+    as_tibble() %>% mutate(item = "Being an involved parent") %>% bind_cols(tmp_data)
+) %>%
+  mutate(
+    lcl = map2_dbl(response, SE, ~qnorm(.025, mean = .x, sd = .y)),
+    ucl = map2_dbl(response, SE, ~qnorm(.975, mean = .x, sd = .y))
+  )
+
+# Tibbles
+rq04$tibble_FAMSURV38_a_W77 <- rq04$svy_tbl_FAMSURV38_a_W77 %>% 
+  as_tibble() %>% group_by(F_GENDER) %>% mutate(pct = n / sum(n)) %>% ungroup()
+rq04$tibble_FAMSURV38_b_W77 <- rq04$svy_tbl_FAMSURV38_b_W77 %>% 
+  as_tibble() %>% group_by(F_GENDER) %>% mutate(pct = n / sum(n)) %>% ungroup()
+rq04$tibble_FAMSURV38_c_W77 <- rq04$svy_tbl_FAMSURV38_c_W77 %>% 
+  as_tibble() %>% group_by(F_GENDER) %>% mutate(pct = n / sum(n)) %>% ungroup()
+rq04$tibble_FAMSURV38_d_W77 <- rq04$svy_tbl_FAMSURV38_d_W77 %>% 
+  as_tibble() %>% group_by(F_GENDER) %>% mutate(pct = n / sum(n)) %>% ungroup()
+
+tmp_dat_1 <- bind_rows(
+  rq04$tibble_FAMSURV38_a_W77 %>% 
+    mutate(item = "Performing household chores") %>% rename(response = FAMSURV38_a_W77), 
+  rq04$tibble_FAMSURV38_b_W77 %>% 
+    mutate(item = "Managing household finances") %>% rename(response = FAMSURV38_b_W77),
+  rq04$tibble_FAMSURV38_c_W77 %>% 
+    mutate(item = "Managing children schedule") %>% rename(response = FAMSURV38_c_W77),
+  rq04$tibble_FAMSURV38_d_W77 %>% 
+    mutate(item = "Being an involved parent") %>% rename(response = FAMSURV38_d_W77)
+) %>%
+  mutate(n = n * if_else(response == "Equal", .5, 1),
+         pct = pct * if_else(response == "Equal", .5, 1),
+         pct = pct * if_else(response == "I do more", -1, +1))
+tmp_dat_2 <- tmp_dat_1 %>% filter(response == "Equal") %>% mutate(pct = -pct)
+tmp_dat_3 <- bind_rows(tmp_dat_1, tmp_dat_2) %>%
+  mutate(response = factor(response, levels = c("I do more", "Equal", "Spouse does more")))
+
+rq04$palette <- c("tomato", "burlywood", "skyblue") 
+names(rq04$palette) <- c("I do more", "Equal", "Spouse does more")
+
+rq04$plot <- tmp_dat_3 %>%
+  mutate(response = fct_relevel(response, "Spouse does more", after = 1)) %>%
+  ggplot(aes(y = F_GENDER, x = pct)) +
+  geom_col(aes(fill = response), color = "gray80") +
+  geom_text(aes(group = response, 
+                label = scales::percent(if_else(response == "Equal", NA_real_, abs(pct)), 1),
+                x = if_else(response == "Equal", pct, pct)), 
+            position = position_stack(vjust = .5), size = 3) +
+  facet_grid(rows = vars(item), switch = "y", 
+             labeller = label_wrap_gen(width = 12, multi_line = TRUE)) +
+  scale_x_continuous(labels = NULL) +
+  scale_y_discrete(labels = wrap_format(15)) +
+  labs(x = NULL, y = NULL, fill = NULL,
+       title = str_wrap("When both parents work full-time, employers treat mothers as less committed than fathers.", 60),
+       subtitle = str_wrap("Mothers is married or cohabiting parents working full-time with children under 18 at home carry more domestic burdens.", 75),
+       caption = "Source: Pew survey of U.S. adults conducted Oct. 13-19, 2020.") +
+  theme_light() +
+  theme_rq +
+  theme(legend.position = "top", strip.text.y.left = element_text(angle = 0)) +
+  # theme(panel.grid.major.y = element_line(color = "gray80")) +
+  guides(fill = guide_legend(reverse = FALSE)) +
+  scale_color_manual(values = rq04$palette) +
+  scale_fill_manual(values = rq04$palette)
+```
+
+## Abstract
+
+#### Objective
+
+Gender equity in career outcomes may be frustrated by unequal child care responsibilities at home. This study evaluates the association of gender with work-life balance as reported in a national survey conducted by the Pew Research Foundation in October 2020.
+
+#### Methods
+
+Using a subset of survey responses consisting of two-parent households with children under 18 in which both parents held a full-time job, chi-squared analyses were conducted to assess the association between gender and factors related to work-life balance.
+
+#### Results
+
+Mothers were more likely to report struggling with work, experiencing negative work-related outcomes, and carrying a disproportionate share of the domestic responsibilities. Among all respondents in two-parent households with children under 18, mothers were less likely to be employed full-time and less likely to prefer working full-time.
+
+#### Conclusion
+
+When both partners work full-time, the mother is more likely to bear an disproportionate share of child care. The burden degrades her career experience. There is some evidence that women contribute to the inequity, often reporting that they prefer working less than full-time.
+
+## Introduction
+
+Organizations pursuing gender equity in leadership roles are often challenged by a lack of candidates. A 2019 study by McKinsey and LeanIn.org hypothesized the "broken rung" effect: *"The biggest obstacle women face on the path to senior leadership is at the first step up to manager."*^[Women in the Workplace 2019, McKinsey and LeanIn.Org, https://www.mckinsey.com/featured-insights/diversity-and-inclusion/women-in-the-workplace#nga_section_header_main_0_universal_1]. While companies will surely benefit by striving to develop and promote leaders equally, there may be social influences that create a headwind. One such influence is the tendency for women to exit the workforce in order to focus on family. A recent study by the [Pew Research Foundation](https://www.pewresearch.org/social-trends/dataset/american-trends-panel-wave-77/) polled American households about their work experiences during the Covid pandemic. The Pew data set is publicly available and is the basis for this study. The gender and family identifiers in the data offer a glimpse into how women and men balance family with career.
+
+## Methods
+
+### Data and study population
+
+The Pew Research Center conducted a survey Oct. 13-19, 2020 to better understand the experiences of employed parents during the coronavirus. Everyone who took part is a member of the Center’s American Trends Panel (ATP), an online survey panel that is recruited through national, random sampling of residential addresses. The survey is weighted to be representative of the U.S. adult population by gender, race, ethnicity, partisan affiliation, education and other categories. Pew provides detailed information on the [ATP](https://www.pewresearch.org/methods/u-s-survey-research/american-trends-panel/), the [survey questions](https://www.pewresearch.org/wp-content/uploads/2021/01/W77-Topline_WorkingParents.pdf), and [survey methodology](https://www.pewresearch.org/social-trends/2020/12/09/methodology-41/).
+
+This analysis is based on two extracts from the survey. The first is `r comma(dim(dat)[1], 1)` married or cohabiting U.S. adults with children younger than 18. This extract was used to evaluate survey two survey items. The *N*-size in the tables below are the weighted sizes (Table 1).
+
+```{r}
+rq01$svy %>% 
+  tbl_svysummary(
+    # by = "F_GENDER", 
+    include = c("E_COVID_W77", "FAMSURV1_W77"),
+    label = list(
+      E_COVID_W77 ~ "Current employment status.",
+      FAMSURV1_W77 ~ "At this point in your life, which of the following would be best for you personally?"),
+    percent = "col") %>%
+  gtsummary::modify_header(label ~ " ") %>%
+  gtsummary::modify_caption("**Table 1**. Selected questions from married or cohabiting U.S. adults with children younger than 18.") %>%
+  gtsummary::bold_labels()
+```
+
+<br><br> 
+
+A second extract refines the first to `r comma(dim(dat_ft)[1], 1)` cases where both partners are employed full-time. It supports three sets of questions related to work-life balance (Tables 2, 3, 4).
+
+> Since the beginning of the coronavirus outbreak, have you personally experienced the following because you were balancing work and parenting responsibilities? (FAMSURV35)
+
+```{r}
+svydesign(ids = ~1, weights = ~ WEIGHT_W77, data = dat_ft) %>%
+  tbl_svysummary(
+    include = c("FAMSURV35_a_W77", "FAMSURV35_b_W77", "FAMSURV35_c_W77", "FAMSURV35_d_W77"),
+    label = list(
+      FAMSURV35_a_W77 ~ "Needed to reduce your work hours",
+      FAMSURV35_b_W77 ~ "Felt like you couldn't give 100% at work",
+      FAMSURV35_c_W77 ~ "Turned down a promotion",
+      FAMSURV35_d_W77 ~ "Turned down an important assignment at work"
+    ),
+    percent = "col") %>%
+  gtsummary::modify_header(label ~ " ") %>%
+  gtsummary::modify_caption("**Table 2**. Sub-questions for FAMSURV35.") %>%
+  gtsummary::bold_labels()
+```
+
+<br><br>
+
+> Since the beginning of the coronavirus outbreak, have you personally experienced the following at work because you have children? (FAMSURV36)
+
+```{r}
+svydesign(ids = ~1, weights = ~ WEIGHT_W77, data = dat_ft) %>%
+  tbl_svysummary(
+    include = c("FAMSURV36_a_W77", "FAMSURV36_b_W77", "FAMSURV36_c_W77"),
+    label = list(
+      FAMSURV36_a_W77 ~ "Being passed over for a promotion",
+      FAMSURV36_b_W77 ~ "Being passed over for an important assignment",
+      FAMSURV36_c_W77 ~ "Being treated as if you weren't committed to your work"
+    ),
+    percent = "col") %>%
+  gtsummary::modify_header(label ~ " ") %>%
+  gtsummary::modify_caption("**Table 3**. Sub-questions for FAMSURV36.") %>%
+  gtsummary::bold_labels()
+```
+
+<br><br>
+
+> For each of the following, who would you say does more? (FAMSURV38)
+
+```{r}
+svydesign(ids = ~1, weights = ~ WEIGHT_W77, data = dat_ft) %>%
+  tbl_svysummary(
+    include = c("FAMSURV38_a_W77", "FAMSURV38_b_W77", "FAMSURV38_c_W77", "FAMSURV38_d_W77"),
+    label = list(
+      FAMSURV38_a_W77 ~ "Household chores and responsibilities",
+      FAMSURV38_b_W77 ~ "Managing household finances",
+      FAMSURV38_c_W77 ~ "Managing your child(ren)'s schedule and activities",
+      FAMSURV38_d_W77 ~ "Being an involved parent"
+    ),
+    percent = "col") %>%
+  gtsummary::modify_header(label ~ " ") %>%
+  gtsummary::modify_caption("**Table 4**. Questions for FAMSURV38.") %>%
+  gtsummary::bold_labels()
+```
+
+<br><br>
+
+For each question a chi-squared analysis was conducted to measure the association between gender and the survey item.
+
+## Results
+
+#### Employment Status
+
+Mothers in two-parent households with children under 18 were much less likely than fathers to be employed full-time (`r rq01$tibble_E_COVID_W77 %>% filter(F_GENDER == "Mothers" & E_COVID_W77 == "Employed full-time") %>% pull(pct) %>% percent(1)` vs. `r rq01$tibble_E_COVID_W77 %>% filter(F_GENDER == "Fathers" & E_COVID_W77 == "Employed full-time") %>% pull(pct) %>% percent(1)`) and much more likely to not be employed at all (`r rq01$tibble_E_COVID_W77 %>% filter(F_GENDER == "Mothers" & E_COVID_W77 == "Not employed") %>% pull(pct) %>% percent(1)` vs. `r rq01$tibble_E_COVID_W77 %>% filter(F_GENDER == "Fathers" & E_COVID_W77 == "Not employed") %>% pull(pct) %>% percent(1)`) (Table 5). Moreover, mothers' judgments on the best employment option were also to not work full-time. In response to question "*At this point in your life, which of the following would be best for you personally?*", only `r rq01$tibble_FAMSURV1_W77 %>% filter(F_GENDER == "Mothers" & FAMSURV1_W77 == "Working full-time for pay") %>% pull(pct) %>% percent(1)` of mothers responded 'working full-time for pay' compared to `r rq01$tibble_FAMSURV1_W77 %>% filter(F_GENDER == "Fathers" & FAMSURV1_W77 == "Working full-time for pay") %>% pull(pct) %>% percent(1)` of fathers.
+
+A chi-square test for association was conducted between gender and employment status. All expected cell frequencies were greater than five. There was a statistically significant association between gender and employment status, $\chi^2$(`r rq01$chisq_E_COVID_W77$parameter`) = `r rq01$chisq_E_COVID_W77$statistic %>% scales::number(1)`, p < 0.001, *V* = `r rq01$cramers_v_E_COVID_W77 %>% scales::number(.001)`. A second chi-square test for association was conducted between gender and best employment option. Again, there was a statistically significant association between gender and employment preference, $\chi^2$(`r rq01$chisq_FAMSURV1_W77$parameter`) = `r rq01$chisq_FAMSURV1_W77$statistic %>% scales::number(1)`, p < 0.001, *V* = `r rq01$cramers_v_FAMSURV1_W77 %>% scales::number(.001)`.
+
+```{r}
+rq01$gt_tbl %>%
+  modify_caption("**Table 5**. Employment status and 'best for your personally'.")
+```
+
+<br><br>
+
+#### Struggles at Work
+
+When both parents work full time, Mothers were more likely than fathers to experience indicators of struggles at work. Women were more likely to report needing to reduce work hours (`r rq02$tibble_FAMSURV35_a_W77 %>% filter(FAMSURV35_a_W77 == "Yes" & F_GENDER == "Mothers") %>% pull(pct) %>% percent(1)` vs. `r rq02$tibble_FAMSURV35_a_W77 %>% filter(FAMSURV35_a_W77 == "Yes" & F_GENDER == "Fathers") %>% pull(pct) %>% percent(1)`), not being able to give 100% at work (`r rq02$tibble_FAMSURV35_b_W77 %>% filter(FAMSURV35_b_W77 == "Yes" & F_GENDER == "Mothers") %>% pull(pct) %>% percent(1)` vs. `r rq02$tibble_FAMSURV35_b_W77 %>% filter(FAMSURV35_b_W77 == "Yes" & F_GENDER == "Fathers") %>% pull(pct) %>% percent(1)`), having to turn down a promotion (`r rq02$tibble_FAMSURV35_c_W77 %>% filter(FAMSURV35_c_W77 == "Yes" & F_GENDER == "Mothers") %>% pull(pct) %>% percent(1)` vs. `r rq02$tibble_FAMSURV35_c_W77 %>% filter(FAMSURV35_c_W77 == "Yes" & F_GENDER == "Fathers") %>% pull(pct) %>% percent(1)`), and having to turn down an important work assignment (`r rq02$tibble_FAMSURV35_d_W77 %>% filter(FAMSURV35_d_W77 == "Yes" & F_GENDER == "Mothers") %>% pull(pct) %>% percent(1)` vs. `r rq02$tibble_FAMSURV35_d_W77 %>% filter(FAMSURV35_d_W77 == "Yes" & F_GENDER == "Fathers") %>% pull(pct) %>% percent(1)`). 
+ 
+A chi-square test for association was conducted between gender and employment struggles for married or cohabiting parents of a child under 18 in the household where both parents are employed full-time. All expected cell frequencies were greater than five. There was a statistically insignificant association between gender and need to reduce work hours, $\chi^2$(`r rq02$chisq_FAMSURV35_a_W77$parameter`) = `r rq02$chisq_FAMSURV35_a_W77$statistic %>% scales::number(.1)`, *p* = `r rq02$chisq_FAMSURV35_a_W77$p.value %>% scales::number(.001)` and between gender and having to turn down an important work assignment, $\chi^2$(`r rq02$chisq_FAMSURV35_d_W77$parameter`) = `r rq02$chisq_FAMSURV35_d_W77$statistic %>% scales::number(.1)`, *p* = `r rq02$chisq_FAMSURV35_d_W77$p.value %>% scales::number(.001)`. There was a small but statistically significant association between gender and giving 100% at work, $\chi^2$(`r rq02$chisq_FAMSURV35_b_W77$parameter`) = `r rq02$chisq_FAMSURV35_b_W77$statistic %>% scales::number(.1)`, *p* = `r rq02$chisq_FAMSURV35_b_W77$p.value %>% scales::number(.001)`, *V* = `r rq02$cramers_v_FAMSURV35_b_W77 %>% scales::number(.001)`, and between gender and turning down a promotion, $\chi^2$(`r rq02$chisq_FAMSURV35_c_W77$parameter`) = `r rq02$chisq_FAMSURV35_c_W77$statistic %>% scales::number(.1)`, *p* = `r rq02$chisq_FAMSURV35_c_W77$p.value %>% scales::number(.001)`, *V* = `r rq02$cramers_v_FAMSURV35_c_W77 %>% scales::number(.001)`. 
+
+```{r}
+rq02$gt_tbl %>%
+  modify_caption("**Table 2**. Struggles when both parents work full-time.")
+```
+
+<br><br>
+
+#### Employer Evaluations
+
+When both parents work full time, Mothers were more likely than fathers to report discouraging evaluations by their employer. Women were more likely to being passed over for promotion (`r rq03$tibble_FAMSURV36_a_W77 %>% filter(FAMSURV36_a_W77 == "Yes" & F_GENDER == "Mothers") %>% pull(pct) %>% percent(1)` vs. `r rq03$tibble_FAMSURV36_a_W77 %>% filter(FAMSURV36_a_W77 == "Yes" & F_GENDER == "Fathers") %>% pull(pct) %>% percent(1)`), being passed over for an important assignment (`r rq03$tibble_FAMSURV36_b_W77 %>% filter(FAMSURV36_b_W77 == "Yes" & F_GENDER == "Mothers") %>% pull(pct) %>% percent(1)` vs. `r rq03$tibble_FAMSURV36_b_W77 %>% filter(FAMSURV36_b_W77 == "Yes" & F_GENDER == "Fathers") %>% pull(pct) %>% percent(1)`), and being treated as not committed to work (`r rq03$tibble_FAMSURV36_c_W77 %>% filter(FAMSURV36_c_W77 == "Yes" & F_GENDER == "Mothers") %>% pull(pct) %>% percent(1)` vs. `r rq03$tibble_FAMSURV36_c_W77 %>% filter(FAMSURV36_c_W77 == "Yes" & F_GENDER == "Fathers") %>% pull(pct) %>% percent(1)`). 
+ 
+A chi-square test for association was conducted between gender and employer treatment for married or cohabiting parents of a child under 18 in the household where both parents are employed full-time. All expected cell frequencies were greater than five. There was a statistically insignificant association between gender and being passed over for promotion, $\chi^2$(`r rq03$chisq_FAMSURV36_a_W77$parameter`) = `r rq03$chisq_FAMSURV36_a_W77$statistic %>% scales::number(.1)`, *p* = `r rq03$chisq_FAMSURV36_a_W77$p.value %>% scales::number(.001)`. There was a small but statistically significant association between gender and being passed over for an important assignment, $\chi^2$(`r rq03$chisq_FAMSURV36_b_W77$parameter`) = `r rq03$chisq_FAMSURV36_b_W77$statistic %>% scales::number(.1)`, *p* = `r rq03$chisq_FAMSURV36_b_W77$p.value %>% scales::number(.001)`, *V* = `r rq03$cramers_v_FAMSURV36_b_W77 %>% scales::number(.001)`, and between gender and being treated as not committed to work, $\chi^2$(`r rq03$chisq_FAMSURV36_c_W77$parameter`) = `r rq03$chisq_FAMSURV36_c_W77$statistic %>% scales::number(.1)`, *p* < .001, *V* = `r rq03$cramers_v_FAMSURV36_c_W77 %>% scales::number(.001)`. 
+
+```{r}
+rq03$gt_tbl %>%
+  modify_caption("**Table 3**. Employer evaluation when both parents work full-time.")
+```
+
+<br><br>
+
+#### Support at Home
+
+When both parents work full time, Mothers were more likely than fathers to report carrying more responsibility than their spouse for household chores (`r rq04$tibble_FAMSURV38_a_W77 %>% filter(FAMSURV38_a_W77 == "I do more" & F_GENDER == "Mothers") %>% pull(pct) %>% percent(1)` vs. `r rq04$tibble_FAMSURV38_a_W77 %>% filter(FAMSURV38_a_W77 == "I do more" & F_GENDER == "Fathers") %>% pull(pct) %>% percent(1)`), managing the children's schedule (`r rq04$tibble_FAMSURV38_c_W77 %>% filter(FAMSURV38_c_W77 == "I do more" & F_GENDER == "Mothers") %>% pull(pct) %>% percent(1)` vs. `r rq04$tibble_FAMSURV38_c_W77 %>% filter(FAMSURV38_c_W77 == "I do more" & F_GENDER == "Fathers") %>% pull(pct) %>% percent(1)`), and being an involved parent (`r rq04$tibble_FAMSURV38_d_W77 %>% filter(FAMSURV38_d_W77 == "I do more" & F_GENDER == "Mothers") %>% pull(pct) %>% percent(1)` vs. `r rq04$tibble_FAMSURV38_d_W77 %>% filter(FAMSURV38_d_W77 == "I do more" & F_GENDER == "Fathers") %>% pull(pct) %>% percent(1)`). Mothers and fathers equally felt unequally burdened managing household finances (`r rq04$tibble_FAMSURV38_b_W77 %>% filter(FAMSURV38_b_W77 == "I do more" & F_GENDER == "Mothers") %>% pull(pct) %>% percent(1)` vs. `r rq04$tibble_FAMSURV38_b_W77 %>% filter(FAMSURV38_b_W77 == "I do more" & F_GENDER == "Fathers") %>% pull(pct) %>% percent(1)`). 
+ 
+A chi-square test for association was conducted between gender and domestic support for married or cohabiting parents of a child under 18 in the household where both parents are employed full-time. All expected cell frequencies were greater than five. There was a statistically significant association between gender and performing household chores, $\chi^2$(`r rq04$chisq_FAMSURV38_a_W77$parameter`) = `r rq04$chisq_FAMSURV38_a_W77$statistic %>% scales::number(.1)`, *p* < .001, *V* = `r rq04$cramers_v_FAMSURV38_a_W77 %>% scales::number(.001)`, managing children's schedule and activities $\chi^2$(`r rq04$chisq_FAMSURV38_c_W77$parameter`) = `r rq04$chisq_FAMSURV38_c_W77$statistic %>% scales::number(.1)`, *p* < .001, *V* = `r rq04$cramers_v_FAMSURV38_c_W77 %>% scales::number(.001)`, and being an involved parent $\chi^2$(`r rq04$chisq_FAMSURV38_d_W77$parameter`) = `r rq04$chisq_FAMSURV38_d_W77$statistic %>% scales::number(.1)`, *p* < .001, *V* = `r rq04$cramers_v_FAMSURV38_d_W77 %>% scales::number(.001)`. 
+
+```{r}
+rq04$gt_tbl %>%
+  modify_caption("**Table 4**. Burden of domestic responsibilities when both parents work full-time.")
+```
+
+## Discussion
+
+Women cannot be equally represented in leadership roles if they are not working. Families often balance domestic and professional pursuits with specialization in which the father is employed full-time while the mother focuses on child care, employed part-time or not at all. The Pew survey found that while `r rq01$tibble_E_COVID_W77 %>% filter(F_GENDER == "Fathers" & E_COVID_W77 == "Employed full-time") %>% pull(pct) %>% percent(1)` of fathers in two-parent households were employed full-time, only `r rq01$tibble_E_COVID_W77 %>% filter(F_GENDER == "Mothers" & E_COVID_W77 == "Employed full-time") %>% pull(pct) %>% percent(1)` of mothers were. These results were echoed by the respondents' expressed preferences for work.
+
+When both the mother and father work full-time, the mother is more likely to report struggling with work-life balance. Mothers also report that the employer notices, treating them as less committed to their work. A likely explanation is that mothers carry a disproportionate share of domestic responsibilities.
+
+#### Limitations
+
+The target population in this study was two-parent families where both parents work full-time and the results may not extend to other family arrangements.
